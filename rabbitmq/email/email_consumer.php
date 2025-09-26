@@ -549,6 +549,512 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
         }
     }
 
+    /**
+     * Get information about a specific folder
+     * Expected $json payload: ["function_to_call": "get_folder_info", "folder_name": "INBOX", ...]
+     */
+    protected function get_folder_info($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($folder_name)) {
+            return ['success' => false, 'errors' => ['"folder_name" is required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            // Get folder information using imap_status
+            $hostname = '{' . $imap_hostname . ':' . (isset($imap_port) ? $imap_port : 993) .
+                       ((isset($imap_use_ssl) ? $imap_use_ssl : true) ? '/imap/ssl/novalidate-cert' : '') . '}' . $folder_name;
+
+            $folder_info = imap_status($email_client->get_mailbox_resource(), $hostname, SA_ALL);
+
+            if ($folder_info) {
+                $result = [
+                    'folder_name' => $folder_name,
+                    'messages' => $folder_info->messages,
+                    'recent' => $folder_info->recent,
+                    'unseen' => $folder_info->unseen,
+                    'uidnext' => isset($folder_info->uidnext) ? $folder_info->uidnext : null,
+                    'uidvalidity' => isset($folder_info->uidvalidity) ? $folder_info->uidvalidity : null
+                ];
+                return ['success' => true, 'data' => $result];
+            } else {
+                return ['success' => false, 'errors' => ["Could not get information for folder: $folder_name"]];
+            }
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Subscribe to a folder
+     * Expected $json payload: ["function_to_call": "subscribe_folder", "folder_name": "INBOX", ...]
+     */
+    protected function subscribe_folder($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($folder_name)) {
+            return ['success' => false, 'errors' => ['"folder_name" is required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $result = $email_client->subscribe_folder($folder_name);
+            return ['success' => $result, 'message' => "Subscribed to folder: $folder_name"];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Unsubscribe from a folder
+     * Expected $json payload: ["function_to_call": "unsubscribe_folder", "folder_name": "INBOX", ...]
+     */
+    protected function unsubscribe_folder($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($folder_name)) {
+            return ['success' => false, 'errors' => ['"folder_name" is required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $result = $email_client->unsubscribe_folder($folder_name);
+            return ['success' => $result, 'message' => "Unsubscribed from folder: $folder_name"];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Get folder tree structure
+     * Expected $json payload: ["function_to_call": "get_folder_tree", ...]
+     */
+    protected function get_folder_tree($json, $message_amqp) {
+        extract($json);
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $tree = $email_client->get_folder_tree();
+            return ['success' => true, 'data' => $tree];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Empty a folder (delete all emails)
+     * Expected $json payload: ["function_to_call": "empty_folder", "folder_name": "INBOX", ...]
+     */
+    protected function empty_folder($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($folder_name)) {
+            return ['success' => false, 'errors' => ['"folder_name" is required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $result = $email_client->empty_folder($folder_name);
+            return ['success' => $result, 'message' => "Folder '$folder_name' has been emptied"];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Get account information
+     * Expected $json payload: ["function_to_call": "get_account_info", ...]
+     */
+    protected function get_account_info($json, $message_amqp) {
+        extract($json);
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $account_info = $email_client->get_account_info();
+            return ['success' => true, 'data' => $account_info];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Get quota information
+     * Expected $json payload: ["function_to_call": "get_quota", "quota_root": "user.username", ...]
+     */
+    protected function get_quota($json, $message_amqp) {
+        extract($json);
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $quota_root = isset($quota_root) ? $quota_root : null;
+            $quota_info = $email_client->get_quota($quota_root);
+            return ['success' => true, 'data' => $quota_info];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Test connection to IMAP server
+     * Expected $json payload: ["function_to_call": "test_connection", ...]
+     */
+    protected function test_connection($json, $message_amqp) {
+        extract($json);
+
+        // No need for persistent connection, use static method
+        $result = \tmwe_email\service\email\Email_Client::test_connection(
+            $imap_hostname,
+            $imap_username,
+            $imap_password,
+            isset($imap_port) ? $imap_port : 993,
+            isset($imap_use_ssl) ? $imap_use_ssl : true
+        );
+
+        return $result;
+    }
+
+    /**
+     * Get messages (alias for get_email_list)
+     * Expected $json payload: ["function_to_call": "get_messages", ...]
+     */
+    protected function get_messages($json, $message_amqp) {
+        return $this->get_email_list($json, $message_amqp);
+    }
+
+    /**
+     * Get a single message (alias for get_single_email)
+     * Expected $json payload: ["function_to_call": "get_message", "uid": 123, ...]
+     */
+    protected function get_message($json, $message_amqp) {
+        return $this->get_single_email($json, $message_amqp);
+    }
+
+    /**
+     * Send a message (alias for send_email)
+     * Expected $json payload: ["function_to_call": "send_message", ...]
+     */
+    protected function send_message($json, $message_amqp) {
+        return $this->send_email($json, $message_amqp);
+    }
+
+    /**
+     * Reply to a message (alias for reply_to_email)
+     * Expected $json payload: ["function_to_call": "reply_message", "uid": 123, "reply_body": "...", ...]
+     */
+    protected function reply_message($json, $message_amqp) {
+        return $this->reply_to_email($json, $message_amqp);
+    }
+
+    /**
+     * Forward a message (alias for forward_email)
+     * Expected $json payload: ["function_to_call": "forward_message", "uid": 123, "to_email": "...", ...]
+     */
+    protected function forward_message($json, $message_amqp) {
+        return $this->forward_email($json, $message_amqp);
+    }
+
+    /**
+     * Delete multiple messages
+     * Expected $json payload: ["function_to_call": "delete_messages", "uids": [123, 456], "expunge": false, ...]
+     */
+    protected function delete_messages($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($uids) || !is_array($uids) || empty($uids)) {
+            return ['success' => false, 'errors' => ['"uids" array is required and cannot be empty.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $expunge = isset($expunge) ? (bool)$expunge : false;
+            $result = $email_client->delete_messages($uids, $expunge);
+            return ['success' => $result, 'message' => 'Messages deleted', 'processed_count' => count($uids)];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Move multiple messages
+     * Expected $json payload: ["function_to_call": "move_messages", "uids": [123, 456], "target_folder": "Archive", ...]
+     */
+    protected function move_messages($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($uids, $target_folder) || !is_array($uids) || empty($uids)) {
+            return ['success' => false, 'errors' => ['"uids" array and "target_folder" are required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $result = $email_client->move_messages($uids, $target_folder);
+            return ['success' => $result, 'message' => "Messages moved to $target_folder", 'processed_count' => count($uids)];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Mark multiple messages with flags
+     * Expected $json payload: ["function_to_call": "mark_messages", "uids": [123, 456], "flag": "\\Seen", "set": true, ...]
+     */
+    protected function mark_messages($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($uids, $flag) || !is_array($uids) || empty($uids)) {
+            return ['success' => false, 'errors' => ['"uids" array and "flag" are required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $set = isset($set) ? (bool)$set : true;
+            $result = $email_client->mark_messages($uids, $flag, $set);
+            $action = $set ? 'set' : 'cleared';
+            return ['success' => $result, 'message' => "Flag $flag $action on messages", 'processed_count' => count($uids)];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Search messages (alias for advanced_search)
+     * Expected $json payload: ["function_to_call": "search_messages", "search_params": {...}, ...]
+     */
+    protected function search_messages($json, $message_amqp) {
+        return $this->advanced_search($json, $message_amqp);
+    }
+
+    /**
+     * Get attachment from a message
+     * Expected $json payload: ["function_to_call": "get_attachment", "uid": 123, "attachment_index": 0, ...]
+     */
+    protected function get_attachment($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($uid, $attachment_index)) {
+            return ['success' => false, 'errors' => ['"uid" and "attachment_index" are required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $attachment = $email_client->get_attachment($uid, $attachment_index);
+            if ($attachment) {
+                return ['success' => true, 'data' => $attachment];
+            } else {
+                return ['success' => false, 'errors' => ["Attachment not found at index $attachment_index for message $uid"]];
+            }
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Perform full synchronization of all folders
+     * Expected $json payload: ["function_to_call": "full_sync", ...]
+     */
+    protected function full_sync($json, $message_amqp) {
+        extract($json);
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            // Start full sync (this could be a long-running process)
+            $result = $email_client->full_sync();
+            return ['success' => true, 'data' => $result];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Perform incremental synchronization
+     * Expected $json payload: ["function_to_call": "incremental_sync", "since_timestamp": 1234567890, ...]
+     */
+    protected function incremental_sync($json, $message_amqp) {
+        extract($json);
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $since_timestamp = isset($since_timestamp) ? (int)$since_timestamp : null;
+            $result = $email_client->incremental_sync($since_timestamp);
+            return ['success' => true, 'data' => $result];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Synchronize a specific folder
+     * Expected $json payload: ["function_to_call": "sync_folder", "folder_name": "INBOX", ...]
+     */
+    protected function sync_folder($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($folder_name)) {
+            return ['success' => false, 'errors' => ['"folder_name" is required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+
+            $result = $email_client->sync_folder($folder_name);
+            return ['success' => true, 'data' => $result];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Get synchronization status
+     * Expected $json payload: ["function_to_call": "get_sync_status", "sync_id": "sync_123", ...]
+     */
+    protected function get_sync_status($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($sync_id)) {
+            // Return all sync statuses if no specific sync_id provided
+            $all_statuses = \tmwe_email\service\email\Email_Client::get_all_sync_statuses();
+            return ['success' => true, 'data' => $all_statuses];
+        }
+
+        $status = \tmwe_email\service\email\Email_Client::get_sync_status($sync_id);
+        if ($status !== false) {
+            return ['success' => true, 'data' => $status];
+        } else {
+            return ['success' => false, 'errors' => ["Sync ID '$sync_id' not found."]];
+        }
+    }
+
+    /**
+     * Cancel a running synchronization
+     * Expected $json payload: ["function_to_call": "cancel_sync", "sync_id": "sync_123", ...]
+     */
+    protected function cancel_sync($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($sync_id)) {
+            return ['success' => false, 'errors' => ['"sync_id" is required.']];
+        }
+
+        $result = \tmwe_email\service\email\Email_Client::cancel_sync($sync_id);
+        if ($result) {
+            return ['success' => true, 'message' => "Sync '$sync_id' has been cancelled."];
+        } else {
+            return ['success' => false, 'errors' => ["Sync ID '$sync_id' not found or cannot be cancelled."]];
+        }
+    }
+
     public function handle_rpc_request($json, $message_amqp) {
 
         if (!isset($json['function_to_call'])) {
@@ -593,6 +1099,52 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             case 'delete_folder':
                 return $this->$function_to_call($json, $message_amqp);
             case 'rename_folder':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_folder_info':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'subscribe_folder':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'unsubscribe_folder':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_folder_tree':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'empty_folder':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_account_info':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_quota':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'test_connection':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_messages':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_message':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'send_message':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'reply_message':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'forward_message':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'delete_messages':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'move_messages':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'mark_messages':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'search_messages':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_attachment':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'full_sync':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'incremental_sync':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'sync_folder':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'get_sync_status':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'cancel_sync':
                 return $this->$function_to_call($json, $message_amqp);
 
             default:

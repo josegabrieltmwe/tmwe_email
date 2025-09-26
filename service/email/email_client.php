@@ -188,6 +188,14 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
     }
 
     /**
+     * Get the mailbox resource for direct IMAP operations
+     * @return resource|false The IMAP mailbox resource or false if not connected
+     */
+    public function get_mailbox_resource() {
+        return $this->connected ? $this->mailbox : false;
+    }
+
+    /**
      * Disconnect from the IMAP server
      */
     public function disconnect() {
@@ -962,5 +970,689 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
         });
 
         return $thread_emails;
+    }
+
+    /**
+     * Subscribe to a folder
+     * @param string $folder_name Folder name to subscribe to
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function subscribe_folder($folder_name) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port . ($this->imap_use_ssl ? '/imap/ssl/novalidate-cert' : '') . '}' . $folder_name;
+        return imap_subscribe($this->mailbox, $hostname);
+    }
+
+    /**
+     * Unsubscribe from a folder
+     * @param string $folder_name Folder name to unsubscribe from
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function unsubscribe_folder($folder_name) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port . ($this->imap_use_ssl ? '/imap/ssl/novalidate-cert' : '') . '}' . $folder_name;
+        return imap_unsubscribe($this->mailbox, $hostname);
+    }
+
+    /**
+     * Get folder tree structure
+     * @return array Hierarchical folder structure
+     * @throws \Exception If not connected to the server.
+     */
+    public function get_folder_tree() {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port . ($this->imap_use_ssl ? '/imap/ssl/novalidate-cert' : '') . '}';
+        $folders = imap_list($this->mailbox, $hostname, '*');
+
+        if ($folders === false) {
+            return [];
+        }
+
+        $tree = [];
+        foreach ($folders as $folder) {
+            $folder_name = str_replace($hostname, '', $folder);
+            $parts = explode('.', $folder_name);
+            $current = &$tree;
+
+            foreach ($parts as $part) {
+                if (!isset($current[$part])) {
+                    $current[$part] = [];
+                }
+                $current = &$current[$part];
+            }
+        }
+
+        return $tree;
+    }
+
+    /**
+     * Empty a folder (delete all emails)
+     * @param string $folder_name Folder name to empty
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function empty_folder($folder_name = 'INBOX') {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        // Switch to the folder first
+        $this->select_folder($folder_name);
+
+        // Get all emails in the folder
+        $emails_uids = imap_search($this->mailbox, 'ALL', SE_UID);
+
+        if (!$emails_uids) {
+            return true; // Folder is already empty
+        }
+
+        // Mark all emails for deletion
+        foreach ($emails_uids as $uid) {
+            imap_delete($this->mailbox, $uid, FT_UID);
+        }
+
+        // Expunge to permanently delete
+        return imap_expunge($this->mailbox);
+    }
+
+    /**
+     * Get account information
+     * @return array Account information
+     * @throws \Exception If not connected to the server.
+     */
+    public function get_account_info() {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $check = imap_check($this->mailbox);
+        $info = [];
+
+        if ($check) {
+            $info = [
+                'mailbox_name' => $check->Mailbox,
+                'message_count' => $check->Nmsgs,
+                'recent_count' => $check->Recent,
+                'driver' => $check->Driver,
+                'check_date' => $check->Date
+            ];
+        }
+
+        // Add server info
+        $info['server'] = [
+            'hostname' => $this->imap_hostname,
+            'port' => $this->imap_port,
+            'username' => $this->imap_username,
+            'ssl_enabled' => $this->imap_use_ssl
+        ];
+
+        // Add capabilities if available
+       /* $capabilities = imap_get_capabilities($this->mailbox);
+        if ($capabilities) {
+            $info['capabilities'] = $capabilities;
+        }
+       */
+        return $info;
+    }
+
+    /**
+     * Get quota information
+     * @param string $quota_root Quota root (default: 'user.' + username)
+     * @return array Quota information
+     * @throws \Exception If not connected to the server.
+     */
+    public function get_quota($quota_root = null) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        if ($quota_root === null) {
+            $quota_root = 'user.' . $this->imap_username;
+        }
+
+        $quota = imap_get_quota($this->mailbox, $quota_root);
+
+        if ($quota === false) {
+            // Try with different quota root formats
+            $alternate_roots = [
+                $this->imap_username,
+                'INBOX',
+                '',
+                'user/' . $this->imap_username
+            ];
+
+            foreach ($alternate_roots as $root) {
+                $quota = imap_get_quota($this->mailbox, $root);
+                if ($quota !== false) {
+                    break;
+                }
+            }
+        }
+
+        if ($quota === false) {
+            return [
+                'quota_supported' => false,
+                'message' => 'Quota information not available or not supported by server'
+            ];
+        }
+
+        $result = [
+            'quota_supported' => true,
+            'quota_root' => $quota_root
+        ];
+
+        if (isset($quota['STORAGE'])) {
+            $result['storage'] = [
+                'used' => $quota['STORAGE']['usage'],
+                'limit' => $quota['STORAGE']['limit'],
+                'unit' => 'KB'
+            ];
+        }
+
+        if (isset($quota['MESSAGE'])) {
+            $result['messages'] = [
+                'used' => $quota['MESSAGE']['usage'],
+                'limit' => $quota['MESSAGE']['limit']
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Test connection without establishing a persistent connection
+     * @param string $imap_hostname IMAP hostname
+     * @param string $imap_username IMAP username
+     * @param string $imap_password IMAP password
+     * @param int $imap_port IMAP port
+     * @param bool $imap_use_ssl Use SSL
+     * @return array Test result with connection details
+     */
+    public static function test_connection($imap_hostname, $imap_username, $imap_password, $imap_port = 993, $imap_use_ssl = true) {
+        $start_time = microtime(true);
+        $result = [
+            'success' => false,
+            'connection_time' => 0,
+            'server_info' => [
+                'hostname' => $imap_hostname,
+                'port' => $imap_port,
+                'ssl' => $imap_use_ssl,
+                'username' => $imap_username
+            ],
+            'errors' => [],
+            'capabilities' => []
+        ];
+
+        try {
+            // Check if IMAP extension is loaded
+            if (!extension_loaded('imap')) {
+                throw new \Exception('IMAP extension is not loaded');
+            }
+
+            // Build hostname string
+            if ($imap_use_ssl) {
+                $hostname = '{' . $imap_hostname . ':' . $imap_port . '/imap/ssl/novalidate-cert}INBOX';
+            } else {
+                $hostname = '{' . $imap_hostname . ':' . $imap_port . '/imap}INBOX';
+            }
+
+            // Clear any previous IMAP errors
+            if (function_exists('imap_errors')) {
+                @imap_errors();
+            }
+            if (function_exists('imap_alerts')) {
+                @imap_alerts();
+            }
+
+            // Attempt connection with timeout
+            set_time_limit(30);
+            $mailbox = @imap_open($hostname, $imap_username, $imap_password, OP_HALFOPEN, 1);
+
+            if ($mailbox) {
+                $result['success'] = true;
+                $result['message'] = 'Connection successful';
+
+                // Get server capabilities
+                $capabilities = @imap_get_capabilities($mailbox);
+                if ($capabilities) {
+                    $result['capabilities'] = $capabilities;
+                }
+
+                // Get basic mailbox info
+                $check = @imap_check($mailbox);
+                if ($check) {
+                    $result['mailbox_info'] = [
+                        'driver' => $check->Driver,
+                        'date' => $check->Date
+                    ];
+                }
+
+                @imap_close($mailbox);
+            } else {
+                $result['success'] = false;
+                $result['message'] = 'Connection failed';
+
+                // Collect error information
+                if (function_exists('imap_last_error')) {
+                    $last_error = @imap_last_error();
+                    if ($last_error) {
+                        $result['errors'][] = $last_error;
+                    }
+                }
+
+                if (function_exists('imap_errors')) {
+                    $all_errors = @imap_errors();
+                    if ($all_errors) {
+                        $result['errors'] = array_merge($result['errors'], $all_errors);
+                    }
+                }
+
+                if (empty($result['errors'])) {
+                    $result['errors'][] = 'Unknown connection error';
+                }
+            }
+
+        } catch (\Exception $e) {
+            $result['success'] = false;
+            $result['message'] = 'Exception occurred during connection test';
+            $result['errors'][] = $e->getMessage();
+        } catch (\Error $e) {
+            $result['success'] = false;
+            $result['message'] = 'Fatal error occurred during connection test';
+            $result['errors'][] = $e->getMessage();
+        }
+
+        $result['connection_time'] = round((microtime(true) - $start_time) * 1000, 2); // milliseconds
+
+        return $result;
+    }
+
+    /**
+     * Delete multiple emails by UIDs
+     * @param array $uids Array of email UIDs
+     * @param bool $expunge Whether to immediately expunge deleted emails
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function delete_messages($uids, $expunge = false) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        if (empty($uids) || !is_array($uids)) {
+            throw new \Exception('UIDs array is required and cannot be empty.');
+        }
+
+        $success_count = 0;
+        foreach ($uids as $uid) {
+            if (imap_delete($this->mailbox, $uid, FT_UID)) {
+                $success_count++;
+            }
+        }
+
+        if ($expunge) {
+            imap_expunge($this->mailbox);
+        }
+
+        return $success_count > 0;
+    }
+
+    /**
+     * Move multiple emails to another folder
+     * @param array $uids Array of email UIDs
+     * @param string $target_folder Target folder name
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function move_messages($uids, $target_folder) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        if (empty($uids) || !is_array($uids)) {
+            throw new \Exception('UIDs array is required and cannot be empty.');
+        }
+
+        $uid_string = implode(',', $uids);
+        $result = imap_mail_move($this->mailbox, $uid_string, $target_folder, CP_UID);
+
+        if ($result) {
+            imap_expunge($this->mailbox);
+        }
+
+        return $result;
+    }
+
+    /**
+     * Mark multiple emails with flags
+     * @param array $uids Array of email UIDs
+     * @param string $flag Flag to set (\\Seen, \\Flagged, \\Answered, etc.)
+     * @param bool $set True to set flag, false to clear it
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function mark_messages($uids, $flag, $set = true) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        if (empty($uids) || !is_array($uids)) {
+            throw new \Exception('UIDs array is required and cannot be empty.');
+        }
+
+        $uid_string = implode(',', $uids);
+
+        if ($set) {
+            return imap_setflag_full($this->mailbox, $uid_string, $flag, ST_UID);
+        } else {
+            return imap_clearflag_full($this->mailbox, $uid_string, $flag, ST_UID);
+        }
+    }
+
+    /**
+     * Get attachment from an email
+     * @param int $uid Email UID
+     * @param int $attachment_index Attachment index (0-based)
+     * @return array|false Attachment data or false if not found
+     * @throws \Exception If not connected to the server.
+     */
+    public function get_attachment($uid, $attachment_index) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $email_data = $this->read_email_by_uid($uid);
+        if (!$email_data || empty($email_data['attachments'])) {
+            return false;
+        }
+
+        if (!isset($email_data['attachments'][$attachment_index])) {
+            return false;
+        }
+
+        return $email_data['attachments'][$attachment_index];
+    }
+
+    // Sync-related properties
+    private static $sync_status = [];
+    private static $sync_cancel_flags = [];
+
+    /**
+     * Perform full synchronization of all folders
+     * @param callable $progress_callback Optional callback to report progress
+     * @return array Sync result with statistics
+     * @throws \Exception If not connected to the server.
+     */
+    public function full_sync($progress_callback = null) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $sync_id = uniqid('full_sync_');
+        self::$sync_status[$sync_id] = [
+            'type' => 'full_sync',
+            'status' => 'running',
+            'progress' => 0,
+            'start_time' => time(),
+            'folders_processed' => 0,
+            'total_folders' => 0,
+            'messages_processed' => 0,
+            'errors' => []
+        ];
+        self::$sync_cancel_flags[$sync_id] = false;
+
+        try {
+            // Get all folders
+            $folders = $this->get_folders();
+            self::$sync_status[$sync_id]['total_folders'] = count($folders);
+
+            foreach ($folders as $index => $folder) {
+                // Check for cancellation
+                if (self::$sync_cancel_flags[$sync_id]) {
+                    self::$sync_status[$sync_id]['status'] = 'cancelled';
+                    break;
+                }
+
+                try {
+                    $folder_result = $this->sync_folder($folder['name'], $sync_id);
+                    self::$sync_status[$sync_id]['messages_processed'] += $folder_result['messages_processed'];
+                } catch (\Exception $e) {
+                    self::$sync_status[$sync_id]['errors'][] = "Folder {$folder['name']}: " . $e->getMessage();
+                }
+
+                self::$sync_status[$sync_id]['folders_processed']++;
+                self::$sync_status[$sync_id]['progress'] = round(($index + 1) / count($folders) * 100, 2);
+
+                if ($progress_callback && is_callable($progress_callback)) {
+                    call_user_func($progress_callback, self::$sync_status[$sync_id]);
+                }
+            }
+
+            if (self::$sync_status[$sync_id]['status'] !== 'cancelled') {
+                self::$sync_status[$sync_id]['status'] = 'completed';
+                self::$sync_status[$sync_id]['progress'] = 100;
+            }
+
+        } catch (\Exception $e) {
+            self::$sync_status[$sync_id]['status'] = 'error';
+            self::$sync_status[$sync_id]['errors'][] = $e->getMessage();
+        }
+
+        self::$sync_status[$sync_id]['end_time'] = time();
+        return ['sync_id' => $sync_id, 'result' => self::$sync_status[$sync_id]];
+    }
+
+    /**
+     * Perform incremental synchronization (only recent changes)
+     * @param int $since_timestamp Timestamp to sync from
+     * @param callable $progress_callback Optional callback to report progress
+     * @return array Sync result with statistics
+     * @throws \Exception If not connected to the server.
+     */
+    public function incremental_sync($since_timestamp = null, $progress_callback = null) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        if ($since_timestamp === null) {
+            $since_timestamp = time() - (24 * 60 * 60); // Last 24 hours by default
+        }
+
+        $sync_id = uniqid('incremental_sync_');
+        self::$sync_status[$sync_id] = [
+            'type' => 'incremental_sync',
+            'status' => 'running',
+            'progress' => 0,
+            'start_time' => time(),
+            'since_timestamp' => $since_timestamp,
+            'folders_processed' => 0,
+            'total_folders' => 0,
+            'messages_processed' => 0,
+            'errors' => []
+        ];
+        self::$sync_cancel_flags[$sync_id] = false;
+
+        try {
+            // Get all folders
+            $folders = $this->get_folders();
+            self::$sync_status[$sync_id]['total_folders'] = count($folders);
+
+            $since_date = date('d-M-Y', $since_timestamp);
+
+            foreach ($folders as $index => $folder) {
+                // Check for cancellation
+                if (self::$sync_cancel_flags[$sync_id]) {
+                    self::$sync_status[$sync_id]['status'] = 'cancelled';
+                    break;
+                }
+
+                try {
+                    $this->select_folder($folder['name']);
+
+                    // Search for recent messages
+                    $search_criteria = "SINCE \"$since_date\"";
+                    $recent_uids = imap_search($this->mailbox, $search_criteria, SE_UID);
+
+                    if ($recent_uids) {
+                        self::$sync_status[$sync_id]['messages_processed'] += count($recent_uids);
+                    }
+
+                } catch (\Exception $e) {
+                    self::$sync_status[$sync_id]['errors'][] = "Folder {$folder['name']}: " . $e->getMessage();
+                }
+
+                self::$sync_status[$sync_id]['folders_processed']++;
+                self::$sync_status[$sync_id]['progress'] = round(($index + 1) / count($folders) * 100, 2);
+
+                if ($progress_callback && is_callable($progress_callback)) {
+                    call_user_func($progress_callback, self::$sync_status[$sync_id]);
+                }
+            }
+
+            if (self::$sync_status[$sync_id]['status'] !== 'cancelled') {
+                self::$sync_status[$sync_id]['status'] = 'completed';
+                self::$sync_status[$sync_id]['progress'] = 100;
+            }
+
+        } catch (\Exception $e) {
+            self::$sync_status[$sync_id]['status'] = 'error';
+            self::$sync_status[$sync_id]['errors'][] = $e->getMessage();
+        }
+
+        self::$sync_status[$sync_id]['end_time'] = time();
+        return ['sync_id' => $sync_id, 'result' => self::$sync_status[$sync_id]];
+    }
+
+    /**
+     * Synchronize a specific folder
+     * @param string $folder_name Folder to synchronize
+     * @param string $parent_sync_id Parent sync ID if part of larger sync
+     * @return array Sync result for the folder
+     * @throws \Exception If not connected to the server.
+     */
+    public function sync_folder($folder_name, $parent_sync_id = null) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        $sync_id = $parent_sync_id ?: uniqid('folder_sync_');
+
+        if (!$parent_sync_id) {
+            self::$sync_status[$sync_id] = [
+                'type' => 'folder_sync',
+                'status' => 'running',
+                'progress' => 0,
+                'start_time' => time(),
+                'folder_name' => $folder_name,
+                'messages_processed' => 0,
+                'errors' => []
+            ];
+            self::$sync_cancel_flags[$sync_id] = false;
+        }
+
+        $messages_processed = 0;
+
+        try {
+            // Check for cancellation
+            if (self::$sync_cancel_flags[$sync_id]) {
+                self::$sync_status[$sync_id]['status'] = 'cancelled';
+                return ['sync_id' => $sync_id, 'messages_processed' => 0];
+            }
+
+            $this->select_folder($folder_name);
+
+            // Get folder status
+            $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port .
+                       ($this->imap_use_ssl ? '/imap/ssl/novalidate-cert' : '') . '}' . $folder_name;
+            $folder_info = imap_status($this->mailbox, $hostname, SA_ALL);
+
+            if ($folder_info) {
+                $total_messages = $folder_info->messages;
+
+                // Get all message UIDs for processing
+                $all_uids = imap_search($this->mailbox, 'ALL', SE_UID);
+
+                if ($all_uids) {
+                    foreach ($all_uids as $index => $uid) {
+                        // Check for cancellation
+                        if (self::$sync_cancel_flags[$sync_id]) {
+                            self::$sync_status[$sync_id]['status'] = 'cancelled';
+                            break;
+                        }
+
+                        // Process message (here you would implement your sync logic)
+                        // For now, we just count it as processed
+                        $messages_processed++;
+
+                        if (!$parent_sync_id) {
+                            self::$sync_status[$sync_id]['progress'] = round(($index + 1) / count($all_uids) * 100, 2);
+                            self::$sync_status[$sync_id]['messages_processed'] = $messages_processed;
+                        }
+                    }
+                }
+            }
+
+            if (!$parent_sync_id && self::$sync_status[$sync_id]['status'] !== 'cancelled') {
+                self::$sync_status[$sync_id]['status'] = 'completed';
+                self::$sync_status[$sync_id]['progress'] = 100;
+            }
+
+        } catch (\Exception $e) {
+            if (!$parent_sync_id) {
+                self::$sync_status[$sync_id]['status'] = 'error';
+                self::$sync_status[$sync_id]['errors'][] = $e->getMessage();
+            }
+            throw $e;
+        }
+
+        if (!$parent_sync_id) {
+            self::$sync_status[$sync_id]['end_time'] = time();
+        }
+
+        return ['sync_id' => $sync_id, 'messages_processed' => $messages_processed];
+    }
+
+    /**
+     * Get synchronization status
+     * @param string $sync_id Sync ID to check
+     * @return array|false Sync status or false if not found
+     */
+    public static function get_sync_status($sync_id) {
+        return isset(self::$sync_status[$sync_id]) ? self::$sync_status[$sync_id] : false;
+    }
+
+    /**
+     * Cancel a running synchronization
+     * @param string $sync_id Sync ID to cancel
+     * @return bool Success status
+     */
+    public static function cancel_sync($sync_id) {
+        if (isset(self::$sync_cancel_flags[$sync_id])) {
+            self::$sync_cancel_flags[$sync_id] = true;
+            if (isset(self::$sync_status[$sync_id])) {
+                self::$sync_status[$sync_id]['status'] = 'cancelling';
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Get all sync statuses
+     * @return array All sync statuses
+     */
+    public static function get_all_sync_statuses() {
+        return self::$sync_status;
     }
 }
