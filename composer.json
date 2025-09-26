@@ -2,6 +2,8 @@
     "require": {
         "guzzlehttp/guzzle": "^7.0",
         "monolog/monolog": "^2.8",
-        "php-amqplib/php-amqplib": "^3.6"
+        "php-amqplib/php-amqplib": "^3.6",
+        "ddeboer/imap": "^1.21",
+        "phpmailer/phpmailer": "^6.10"
     }
 }

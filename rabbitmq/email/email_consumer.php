@@ -19,7 +19,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
         try {
-            $email_client->connect($imap_hostname, $imap_username, $imap_password, isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+            $email_client->connect($imap_hostname, $imap_username, $imap_password, isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $folder = isset($folder) ? $folder : 'INBOX';
             $criteria = isset($criteria) ? $criteria : 'ALL';
@@ -65,7 +65,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
         try {
-            $email_client->connect($imap_hostname, $imap_username, $imap_password, isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+            $email_client->connect($imap_hostname, $imap_username, $imap_password, isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $email_data = $email_client->read_email_by_uid($uid);
 
@@ -85,41 +85,49 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     protected function send_email($json, $message_amqp) {
         extract($json);
-        
+
         if(isset($smtp_config)){
             extract($smtp_config);
         }
         
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
-        
-        $smtp_host = isset($smtp_host)?$smtp_host:(isset($smtp_server)?$smtp_server:false);
+        $smtp_host = isset($smtp_host) ? $smtp_host : (isset($smtp_server) ? $smtp_server : (isset($smtp_hostname)?$smtp_hostname:false));
         $smtp_username = isset($smtp_username)?$smtp_username:(isset($smtp_user)?$smtp_user:false);
-        $use_ssl = isset($use_ssl)?$use_ssl:false;
+        $smtp_use_ssl = isset($smtp_use_ssl)?$smtp_use_ssl:false;
+        $smtp_use_tls = isset($smtp_use_tls)?$smtp_use_tls:false;
         
         try {
             // Assuming SMTP connection details are also provided in the JSON payload
             // or are fetched from a configuration.
             // For simplicity, let's assume they are directly in $json for this example.
-            if (!isset($smtp_host, $smtp_port, $smtp_username, $smtp_password, $use_ssl) && $smtp_host && $smtp_port && $smtp_username && $smtp_password) {
+            if (!isset($smtp_host, $smtp_port, $smtp_username, $smtp_password) && $smtp_host && $smtp_port && $smtp_username && $smtp_password) {
                 return ['success' => false, 'errors' => ['Missing SMTP connection parameters.']];
             }
+
+            $smtp_password = isset($smtp_password)?$smtp_password:$imap_password;
 
             $email_client->connect_smtp(
                     $smtp_host,
                     $smtp_port,
                     $smtp_username,
                     $smtp_password,
-                    $use_ssl
+                    $smtp_use_ssl,
+                    $smtp_use_tls
             );
+
+            if(isset($message_data)){
+                extract($message_data);
+            }
 
             if (!isset($to, $subject, $body,)) {
                 return ['success' => false, 'errors' => ['Missing email parameters (to, subject, or body).']];
             }
 
             $headers = isset($headers) ? (array) $headers : [];
-            $from = isset($from)?$from:false;
-            
+            $from = (isset($from) && $from)?$from:$smtp_username;
+
+
             $email_client->send_email($to, $subject, $body, $headers, $from);
             return ['success' => true, 'message' => 'Email sent successfully.'];
         } catch (\Exception $e) {
@@ -138,7 +146,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
         
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
             
             $folders = $email_client->get_folders();
             return ['success' => true, 'data' => $folders];
@@ -162,7 +170,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $folder = isset($folder) ? $folder : 'INBOX';
             $result = $email_client->select_folder($folder);
@@ -191,7 +199,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $read = isset($read) ? (bool)$read : true;
             $result = $email_client->mark_as_read($uid, $read);
@@ -220,7 +228,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $flagged = isset($flagged) ? (bool)$flagged : true;
             $result = $email_client->mark_as_flagged($uid, $flagged);
@@ -249,7 +257,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->move_email($uid, $target_folder);
             return ['success' => $result, 'message' => "Email moved to $target_folder"];
@@ -277,7 +285,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->copy_email($uid, $target_folder);
             return ['success' => $result, 'message' => "Email copied to $target_folder"];
@@ -305,7 +313,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $expunge = isset($expunge) ? (bool)$expunge : false;
             $result = $email_client->delete_email($uid, $expunge);
@@ -334,7 +342,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $uids = $email_client->advanced_search($search_params);
             return ['success' => true, 'data' => $uids];
@@ -367,18 +375,19 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
         try {
             // Connect to IMAP first
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             // Connect to SMTP
-            $smtp_host = isset($smtp_host) ? $smtp_host : (isset($smtp_server) ? $smtp_server : false);
+            $smtp_host = isset($smtp_host) ? $smtp_host : (isset($smtp_server) ? $smtp_server : (isset($smtp_hostname)?$smtp_hostname:false));
             $smtp_username = isset($smtp_username) ? $smtp_username : (isset($smtp_user) ? $smtp_user : false);
-            $use_ssl = isset($use_ssl) ? $use_ssl : false;
+            $smtp_use_ssl = isset($smtp_use_ssl) ? $smtp_use_ssl : false;
+            $smtp_use_tls = isset($smtp_use_tls) ? $smtp_use_tls : false;
 
             if (!isset($smtp_host, $smtp_port, $smtp_username, $smtp_password)) {
                 return ['success' => false, 'errors' => ['Missing SMTP connection parameters.']];
             }
 
-            $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $use_ssl);
+            $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_use_ssl, $smtp_use_tls);
 
             $reply_all = isset($reply_all) ? (bool)$reply_all : false;
             $result = $email_client->reply_to_email($uid, $reply_body, $reply_all);
@@ -409,21 +418,24 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
+        $smtp_password = isset($smtp_password)?$smtp_password:$imap_password;
+
         try {
             // Connect to IMAP first
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             // Connect to SMTP
-            $smtp_host = isset($smtp_host) ? $smtp_host : (isset($smtp_server) ? $smtp_server : false);
+            $smtp_host = isset($smtp_host) ? $smtp_host : (isset($smtp_server) ? $smtp_server : (isset($smtp_hostname)?$smtp_hostname:false));
             $smtp_username = isset($smtp_username) ? $smtp_username : (isset($smtp_user) ? $smtp_user : false);
-            $use_ssl = isset($use_ssl) ? $use_ssl : false;
+            $smtp_use_ssl = isset($smtp_use_ssl) ? $smtp_use_ssl : false;
+            $smtp_use_tls = isset($smtp_use_tls) ? $smtp_use_tls : false;
 
             if (!isset($smtp_host, $smtp_port, $smtp_username, $smtp_password)) {
                 return ['success' => false, 'errors' => ['Missing SMTP connection parameters.']];
             }
 
-            $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $use_ssl);
+            $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_use_ssl, $smtp_use_tls);
 
             $forward_message = isset($forward_message) ? $forward_message : '';
             $result = $email_client->forward_email($uid, $to_email, $forward_message);
@@ -452,7 +464,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $thread_emails = $email_client->get_email_thread($uid);
             return ['success' => true, 'data' => $thread_emails];
@@ -480,7 +492,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->create_folder($folder_name);
             return ['success' => $result, 'message' => "Folder '$folder_name' created"];
@@ -508,7 +520,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->delete_folder($folder_name);
             return ['success' => $result, 'message' => "Folder '$folder_name' deleted"];
@@ -536,7 +548,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->rename_folder($old_name, $new_name);
             return ['success' => $result, 'message' => "Folder renamed from '$old_name' to '$new_name'"];
@@ -564,22 +576,30 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
-            // Get folder information using imap_status
-            $hostname = '{' . $imap_hostname . ':' . (isset($imap_port) ? $imap_port : 993) .
-                       ((isset($imap_use_ssl) ? $imap_use_ssl : true) ? '/imap/ssl/novalidate-cert' : '') . '}' . $folder_name;
+            // Switch to the requested folder first
+            $email_client->select_folder($folder_name);
 
-            $folder_info = imap_status($email_client->get_mailbox_resource(), $hostname, SA_ALL);
+            // Get folder information from Email_Client methods
+            $folders = $email_client->get_folders();
+            $folder_info = null;
+
+            foreach ($folders as $folder) {
+                if ($folder['name'] === $folder_name) {
+                    $folder_info = $folder;
+                    break;
+                }
+            }
 
             if ($folder_info) {
                 $result = [
                     'folder_name' => $folder_name,
-                    'messages' => $folder_info->messages,
-                    'recent' => $folder_info->recent,
-                    'unseen' => $folder_info->unseen,
-                    'uidnext' => isset($folder_info->uidnext) ? $folder_info->uidnext : null,
-                    'uidvalidity' => isset($folder_info->uidvalidity) ? $folder_info->uidvalidity : null
+                    'messages' => $folder_info['messages'],
+                    'recent' => $folder_info['recent'],
+                    'unseen' => $folder_info['unseen'],
+                    'uidnext' => null, // Not available in ddeboer library
+                    'uidvalidity' => null // Not available in ddeboer library
                 ];
                 return ['success' => true, 'data' => $result];
             } else {
@@ -609,7 +629,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->subscribe_folder($folder_name);
             return ['success' => $result, 'message' => "Subscribed to folder: $folder_name"];
@@ -637,7 +657,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->unsubscribe_folder($folder_name);
             return ['success' => $result, 'message' => "Unsubscribed from folder: $folder_name"];
@@ -661,7 +681,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $tree = $email_client->get_folder_tree();
             return ['success' => true, 'data' => $tree];
@@ -689,7 +709,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->empty_folder($folder_name);
             return ['success' => $result, 'message' => "Folder '$folder_name' has been emptied"];
@@ -713,7 +733,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $account_info = $email_client->get_account_info();
             return ['success' => true, 'data' => $account_info];
@@ -737,7 +757,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $quota_root = isset($quota_root) ? $quota_root : null;
             $quota_info = $email_client->get_quota($quota_root);
@@ -764,7 +784,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $imap_username,
             $imap_password,
             isset($imap_port) ? $imap_port : 993,
-            isset($imap_use_ssl) ? $imap_use_ssl : true
+            isset($imap_use_ssl) ? $imap_use_ssl : true,
+            isset($imap_use_tls) ? $imap_use_tls : false
         );
 
         return $result;
@@ -825,7 +846,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $expunge = isset($expunge) ? (bool)$expunge : false;
             $result = $email_client->delete_messages($uids, $expunge);
@@ -854,7 +875,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->move_messages($uids, $target_folder);
             return ['success' => $result, 'message' => "Messages moved to $target_folder", 'processed_count' => count($uids)];
@@ -882,7 +903,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $set = isset($set) ? (bool)$set : true;
             $result = $email_client->mark_messages($uids, $flag, $set);
@@ -920,7 +941,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $attachment = $email_client->get_attachment($uid, $attachment_index);
             if ($attachment) {
@@ -948,7 +969,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             // Start full sync (this could be a long-running process)
             $result = $email_client->full_sync();
@@ -973,7 +994,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $since_timestamp = isset($since_timestamp) ? (int)$since_timestamp : null;
             $result = $email_client->incremental_sync($since_timestamp);
@@ -1002,7 +1023,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
-                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true);
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
             $result = $email_client->sync_folder($folder_name);
             return ['success' => true, 'data' => $result];
