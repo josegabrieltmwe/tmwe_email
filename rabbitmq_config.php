@@ -38,8 +38,8 @@ class Rabbitmq_Config {
         $this->user = 'tmwe-rabbit-admin';
         $this->password = 'f3415fa7c1fcd36257ee98c0a9765e0b84e72ab4103786325146ef6f0439bf7e';
 
-        $this->email_client_queue = 'tmwe_email_client_queue';
-        $this->log_queue = 'tmwe_email_log_queue';
+        $this->email_client_queue = 'tmwe_email_client_queue_ia';
+        $this->log_queue = 'tmwe_email_log_queue_ia';
     }
 
     public function get_user() {

@@ -25,6 +25,8 @@ if (!defined('CP_UID'))
 if (!defined('SA_ALL'))
     define('SA_ALL', 15); // For imap_status - get all status information
 
+// Resto de tu código
+
 /**
  * Description of Email_Client
  *
@@ -61,19 +63,117 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             $imap_username,
             $imap_password,
             $imap_port = 993,
-            $imap_use_ssl = true
+            $imap_use_ssl = false
     ) {
+
+        
+        
         $this->imap_hostname = $imap_hostname;
         $this->imap_username = $imap_username;
         $this->imap_password = $imap_password;
         $this->imap_port = $imap_port;
         $this->imap_use_ssl = $imap_use_ssl;
 
-        $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port . ($this->imap_use_ssl ? '/imap/ssl/novalidate-cert' : '') . '}INBOX';
+        // Try different hostname configurations
+        if (!$this->imap_use_ssl) {
+            // More comprehensive SSL options for troubleshooting
+            $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port . '/imap/ssl/novalidate-cert/notls}INBOX';
+            $this->log("Using SSL hostname (with notls): " . $hostname);
+        } else {
+            $hostname = '{' . $this->imap_hostname . ':' . $this->imap_port . '/imap}INBOX';
+            $this->log("Using non-SSL hostname: " . $hostname);
+        }
 
-        $mailbox = imap_open($hostname, $this->imap_username, $this->imap_password);
+        // Log connection attempt details to both error log and file
+        $debug_msg = "IMAP Connection Debug:\n";
+        $debug_msg .= "Hostname string: " . $hostname . "\n";
+        $debug_msg .= "Username: " . $this->imap_username . "\n";
+        $debug_msg .= "Password length: " . strlen($this->imap_password) . "\n";
+        $debug_msg .= "Port: " . $this->imap_port . "\n";
+        $debug_msg .= "SSL: " . ($this->imap_use_ssl ? 'true' : 'false') . "\n";
+
+        // Log connection debug information
+        $this->log($debug_msg);
+
+        // Clear any previous IMAP errors
+        imap_errors();
+        imap_alerts();
+
+        // Additional diagnostics before attempting connection
+        $log_msg = "About to attempt imap_open...";
+        $this->log($log_msg);
+
+        // Check if IMAP extension is loaded before attempting connection
+        if (!extension_loaded('imap')) {
+            $error_msg = "FATAL: IMAP extension is NOT loaded!";
+            $this->log_fail($error_msg);
+            throw new \Exception('IMAP extension is not loaded. Please install php-imap extension.');
+        }
+
+        // Check if functions exist
+        if (!function_exists('imap_open')) {
+            $error_msg = "FATAL: imap_open function does not exist!";
+            $this->log_fail($error_msg);
+            throw new \Exception('imap_open function does not exist.');
+        }
+
+        // Test with shorter timeout and different options
+        $options = 0;
+        $retries = 1;
+
+        $log_msg = "Calling imap_open with options: $options, retries: $retries";
+        $this->log($log_msg);
+
+        try {
+            // Use error suppression and check if function hangs
+            set_time_limit(30); // 30 second timeout
+
+            $log_msg = "Starting imap_open call...";
+            $this->log($log_msg);
+
+            $mailbox = @imap_open($hostname, $this->imap_username, $this->imap_password, $options, $retries);
+
+            $log_msg = "imap_open call completed";
+            $this->log($log_msg);
+
+        } catch(\Exception $e) {
+            $error_msg = "Exception caught: " . $e->getMessage();
+            $this->log_fail($error_msg);
+            $mailbox = false;
+        } catch(\Error $e) {
+            $error_msg = "Fatal error caught: " . $e->getMessage();
+            $this->log_fail($error_msg);
+            $mailbox = false;
+        } catch(\Throwable $e) {
+            $error_msg = "Throwable caught: " . $e->getMessage();
+            $this->log_fail($error_msg);
+            $mailbox = false;
+        }
+
         if ($mailbox === false) {
-            throw new \Exception('IMAP connection error: ' . imap_last_error());
+            $last_error = imap_last_error();
+            $all_errors = imap_errors();
+            $alerts = imap_alerts();
+
+            $this->log_fail("IMAP connection failed!");
+            $this->log_fail("Last error: " . ($last_error ? $last_error : 'No error message'));
+
+            if ($all_errors) {
+                $this->log_fail("All errors: " . implode(', ', $all_errors));
+            }
+
+            if ($alerts) {
+                $this->log("Alerts: " . implode(', ', $alerts));
+            }
+
+            // Check if IMAP extension is loaded
+            if (!extension_loaded('imap')) {
+                $this->log_fail("IMAP extension is NOT loaded!");
+            }
+
+            throw new \Exception('IMAP connection error: ' . ($last_error ? $last_error : 'Unknown error') .
+                                ($all_errors ? ' | All errors: ' . implode(', ', $all_errors) : '') .
+                                ($alerts ? ' | Alerts: ' . implode(', ', $alerts) : ''));
         }
         $this->mailbox = $mailbox;
         $this->connected = true;
