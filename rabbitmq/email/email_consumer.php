@@ -1082,6 +1082,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             return ['success' => false, 'errors' => ['no function to call found']];
         }
 
+        return [$json];
+
         $function_to_call = $json['function_to_call'];
         switch ($function_to_call) {
             // Original functions
