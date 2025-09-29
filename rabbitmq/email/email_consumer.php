@@ -18,6 +18,10 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
+        if(isset($json['options'])){
+            extract($json['options']);
+        }
+
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password, isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
