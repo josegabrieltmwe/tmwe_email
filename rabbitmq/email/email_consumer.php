@@ -144,6 +144,16 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $headers = isset($headers) ? (array) $headers : [];
             $from = (isset($from) && $from)?$from:$smtp_username;
 
+            // Normalize attachment format: 'content' -> 'data'
+            if (!empty($attachments) && is_array($attachments)) {
+                foreach ($attachments as &$attachment) {
+                    if (isset($attachment['content']) && !isset($attachment['data'])) {
+                        $attachment['data'] = $attachment['content'];
+                        unset($attachment['content']);
+                    }
+                }
+            }
+
             $email_client->send_email($to, $subject, $body, $headers, $from, $cc, $bcc, $body_html, $attachments);
             return ['success' => true, 'message' => 'Email sent successfully.'];
         } catch (\Exception $e) {
@@ -443,6 +453,16 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $body_html = isset($body_html) ? $body_html : '';
             $attachments = isset($attachments) ? $attachments : [];
 
+            // Normalize attachment format: 'content' -> 'data'
+            if (!empty($attachments) && is_array($attachments)) {
+                foreach ($attachments as &$attachment) {
+                    if (isset($attachment['content']) && !isset($attachment['data'])) {
+                        $attachment['data'] = $attachment['content'];
+                        unset($attachment['content']);
+                    }
+                }
+            }
+
             $result = $email_client->reply_to_email($uid, $reply_body, $reply_all, $body_html, $attachments);
 
             return ['success' => $result, 'message' => 'Reply sent successfully'];
@@ -509,6 +529,16 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $bcc = isset($bcc) ? $bcc : '';
             $body_html = isset($body_html) ? $body_html : '';
             $attachments = isset($attachments) ? $attachments : [];
+
+            // Normalize attachment format: 'content' -> 'data'
+            if (!empty($attachments) && is_array($attachments)) {
+                foreach ($attachments as &$attachment) {
+                    if (isset($attachment['content']) && !isset($attachment['data'])) {
+                        $attachment['data'] = $attachment['content'];
+                        unset($attachment['content']);
+                    }
+                }
+            }
 
             $result = $email_client->forward_email($uid, $to_email, $forward_message, $cc, $bcc, $body_html, $attachments);
 
