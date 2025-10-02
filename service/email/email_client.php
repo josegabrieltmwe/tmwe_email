@@ -1714,11 +1714,24 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             // Get original email details
             $original_subject = $original_message->getSubject();
-            $original_body = $original_message->getBodyHtml() ?: $original_message->getBodyText();
+            $original_body_html = $original_message->getBodyHtml();
+            $original_body_text = $original_message->getBodyText();
 
             // Prepare forward
             $forward_subject = preg_match('/^Fwd?:/i', $original_subject) ? $original_subject : 'Fwd: ' . $original_subject;
-            $forward_body = $forward_message . "\n\n" . "---------- Forwarded message ----------\n" . $original_body;
+
+            // Determine if we should send HTML or plain text
+            $is_html = !empty($original_body_html);
+
+            if ($is_html) {
+                // HTML format
+                $forward_body = nl2br(htmlspecialchars($forward_message))
+                    . "<br><br><b>---------- Forwarded message ----------</b><br><br>"
+                    . $original_body_html;
+            } else {
+                // Plain text format
+                $forward_body = $forward_message . "\n\n" . "---------- Forwarded message ----------\n\n" . $original_body_text;
+            }
 
             // Set sender (FROM)
             $this->mailer->setFrom($this->smtp_username, 'Sender');
@@ -1730,6 +1743,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             // Set forward content
             $this->mailer->Subject = $forward_subject;
             $this->mailer->Body = $forward_body;
+            $this->mailer->isHTML($is_html);
 
             // Forward attachments
             $attachments = $original_message->getAttachments();
