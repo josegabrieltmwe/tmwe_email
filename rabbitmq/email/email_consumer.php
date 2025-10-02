@@ -391,6 +391,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
     protected function reply_to_email($json, $message_amqp) {
         extract($json);
 
+        $reply_body = isset($reply_body)?$reply_body:$body;
+
         if (!isset($uid, $reply_body)) {
             return ['success' => false, 'errors' => ['"uid" and "reply_body" are required.']];
         }

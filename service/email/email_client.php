@@ -347,11 +347,19 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             $overview->recent = 0; // ddeboer doesn't provide recent flag directly
 
-            // Check if message has attachments
+            // Check if message has attachments (only count non-empty attachments)
             try {
                 $attachments = $message->getAttachments();
-                $overview->has_attachments = count($attachments) > 0 ? 1 : 0;
-                $overview->attachments_count = count($attachments);
+                $valid_attachments = 0;
+                foreach ($attachments as $attachment) {
+                    $decoded_content = $attachment->getDecodedContent();
+                    $size_bytes = strlen($decoded_content);
+                    if ($size_bytes > 0) {
+                        $valid_attachments++;
+                    }
+                }
+                $overview->has_attachments = $valid_attachments > 0 ? 1 : 0;
+                $overview->attachments_count = $valid_attachments;
             } catch (\Exception $e) {
                 $overview->has_attachments = 0;
                 $overview->attachments_count = 0;
@@ -449,6 +457,11 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             foreach ($attachments as $attachment) {
                 $decoded_content = $attachment->getDecodedContent();
                 $size_bytes = strlen($decoded_content);
+
+                // Skip attachments with size 0
+                if ($size_bytes === 0) {
+                    continue;
+                }
 
                 $email_data['attachments'][] = [
                     'filename' => $attachment->getFilename(),
@@ -1558,6 +1571,11 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             $attachment = $attachments[$attachment_index];
             $decoded_content = $attachment->getDecodedContent();
             $size_bytes = strlen($decoded_content);
+
+            // Return false if attachment has size 0
+            if ($size_bytes === 0) {
+                return false;
+            }
 
             return [
                 'filename' => $attachment->getFilename(),
