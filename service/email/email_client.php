@@ -152,7 +152,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             }
 
             return $folder_list;
-            
+
         } catch (\Exception $e) {
             $this->log_fail("Error getting folders: " . $e->getMessage());
             throw new \Exception('Failed to get folders: ' . $e->getMessage());
@@ -208,15 +208,38 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             // Get messages iterator (don't convert to array yet)
             $messages = $this->current_mailbox->getMessages($search);
-            $total = count($messages);
 
+            // Get total count without iterating
+            $total = count($messages);
             $this->log("Found {$total} total messages, starting optimized processing...");
+
+            // If limit is set and offset is beyond total, return empty
+            if ($limit !== false && $offset >= $total) {
+                $this->log("Offset {$offset} is beyond total {$total}, returning empty");
+                return [
+                    'messages' => [],
+                    'from' => $offset,
+                    'to' => $offset,
+                    'total' => $total
+                ];
+            }
 
             // Create array for efficiently sorting and limiting
             $message_numbers = [];
+            $count = 0;
+            $this->log("Extracting message numbers...");
+
             foreach ($messages as $message) {
                 $message_numbers[] = $message->getNumber();
+                $count++;
+
+                // Log progress every 100 messages to detect hangs
+                if ($count % 100 === 0) {
+                    $this->log("Processed {$count}/{$total} message numbers...");
+                }
             }
+
+            $this->log("Extracted {$count} message numbers successfully");
 
             // Sort message numbers in descending order (newest first)
             rsort($message_numbers);
@@ -1680,6 +1703,8 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
         }
 
         $to_email = is_array($to_email)?implode(', ', $to_email):$to_email;
+
+        
 
         try {
             $original_message = $this->current_mailbox->getMessage($uid);

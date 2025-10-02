@@ -479,7 +479,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
             $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_use_ssl, $smtp_use_tls);
 
-            $forward_message = isset($forward_message) ? $forward_message : '';
+            $forward_message = isset($forward_message) ? $forward_message : $body;
 
             $result = $email_client->forward_email($uid, $to_email, $forward_message);
 
