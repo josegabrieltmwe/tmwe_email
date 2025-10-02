@@ -89,7 +89,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     protected function send_email($json, $message_amqp) {
         extract($json);
-
+        
         if(isset($smtp_config)){
             extract($smtp_config);
         }
@@ -131,11 +131,9 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $headers = isset($headers) ? (array) $headers : [];
             $from = (isset($from) && $from)?$from:$smtp_username;
 
-
             $email_client->send_email($to, $subject, $body, $headers, $from);
             return ['success' => true, 'message' => 'Email sent successfully.'];
         } catch (\Exception $e) {
-            echo $e->getMessage();
             return ['success' => false, 'errors' => ['Failed to send email: ' . $e->getMessage()]];
         }
     }

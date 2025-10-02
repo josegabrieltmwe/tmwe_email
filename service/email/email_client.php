@@ -525,11 +525,15 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
         }
         try {
             $this->mailer->clearAddresses();
+            
             $this->mailer->setFrom(!$from ? $this->smtp_username : $from, 'Sender');
+            $to = is_array($to)?implode(', ', $to):$to;
             $this->mailer->addAddress($to);
 
             $this->mailer->Subject = $subject;
+
             $this->mailer->Body = $body;
+
             $this->mailer->isHTML(true);
 
             foreach ($headers as $key => $value) {
@@ -538,6 +542,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             $this->mailer->send();
         } catch (Exception $e) {
+            
             throw new \Exception('Mailer Error: ' . $this->mailer->ErrorInfo);
         }
     }
