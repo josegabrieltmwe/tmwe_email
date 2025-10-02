@@ -347,6 +347,16 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             $overview->recent = 0; // ddeboer doesn't provide recent flag directly
 
+            // Check if message has attachments
+            try {
+                $attachments = $message->getAttachments();
+                $overview->has_attachments = count($attachments) > 0 ? 1 : 0;
+                $overview->attachments_count = count($attachments);
+            } catch (\Exception $e) {
+                $overview->has_attachments = 0;
+                $overview->attachments_count = 0;
+            }
+
             return $overview;
 
         } catch (\Exception $e) {
@@ -364,6 +374,8 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             $overview->flagged = 0;
             $overview->answered = 0;
             $overview->recent = 0;
+            $overview->has_attachments = 0;
+            $overview->attachments_count = 0;
             return $overview;
         }
     }
