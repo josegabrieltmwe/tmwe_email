@@ -138,6 +138,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
         try {
             $mailboxes = $this->connection->getMailboxes();
+
             $folder_list = [];
 
             foreach ($mailboxes as $mailbox) {
@@ -151,6 +152,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             }
 
             return $folder_list;
+            
         } catch (\Exception $e) {
             $this->log_fail("Error getting folders: " . $e->getMessage());
             throw new \Exception('Failed to get folders: ' . $e->getMessage());
@@ -1606,6 +1608,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
         try {
             $original_message = $this->current_mailbox->getMessage($uid);
+
             if (!$original_message) {
                 return false;
             }
@@ -1619,6 +1622,9 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             // Prepare reply
             $reply_subject = preg_match('/^Re:/i', $original_subject) ? $original_subject : 'Re: ' . $original_subject;
             $reply_to = $original_from ? $original_from->getAddress() : '';
+
+            // Set sender (FROM)
+            $this->mailer->setFrom($this->smtp_username, 'Sender');
 
             // Clear previous recipients
             $this->mailer->clearAddresses();
@@ -1673,6 +1679,8 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             throw new \Exception('Not connected to server or SMTP not configured.');
         }
 
+        $to_email = is_array($to_email)?implode(', ', $to_email):$to_email;
+
         try {
             $original_message = $this->current_mailbox->getMessage($uid);
             if (!$original_message) {
@@ -1686,6 +1694,9 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             // Prepare forward
             $forward_subject = preg_match('/^Fwd?:/i', $original_subject) ? $original_subject : 'Fwd: ' . $original_subject;
             $forward_body = $forward_message . "\n\n" . "---------- Forwarded message ----------\n" . $original_body;
+
+            // Set sender (FROM)
+            $this->mailer->setFrom($this->smtp_username, 'Sender');
 
             // Clear previous recipients and set new ones
             $this->mailer->clearAddresses();

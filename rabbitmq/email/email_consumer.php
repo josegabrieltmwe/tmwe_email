@@ -391,6 +391,10 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
     protected function reply_to_email($json, $message_amqp) {
         extract($json);
 
+        if(isset($reply_data)){
+            extract($reply_data);
+        }
+
         $reply_body = isset($reply_body)?$reply_body:$body;
 
         if (!isset($uid, $reply_body)) {
@@ -422,6 +426,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
             $reply_all = isset($reply_all) ? (bool)$reply_all : false;
             $result = $email_client->reply_to_email($uid, $reply_body, $reply_all);
+            
             return ['success' => $result, 'message' => 'Reply sent successfully'];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
@@ -438,6 +443,12 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
      */
     protected function forward_email($json, $message_amqp) {
         extract($json);
+
+        if(isset($forward_data)){
+            extract($forward_data);
+        }
+
+        $to_email = (isset($to_email))?$to_email:$to;
 
         if (!isset($uid, $to_email)) {
             return ['success' => false, 'errors' => ['"uid" and "to_email" are required.']];
@@ -469,7 +480,9 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_use_ssl, $smtp_use_tls);
 
             $forward_message = isset($forward_message) ? $forward_message : '';
+
             $result = $email_client->forward_email($uid, $to_email, $forward_message);
+
             return ['success' => $result, 'message' => 'Email forwarded successfully'];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
