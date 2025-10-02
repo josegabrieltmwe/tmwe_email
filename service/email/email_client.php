@@ -672,7 +672,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
      * @return bool Success status
      * @throws \Exception If not connected to the server.
      */
-    public function delete_email($uid, $expunge = false) {
+    public function delete_email($uid, $expunge = true) {
         if (!$this->connected) {
             throw new \Exception('Not connected to the server.');
         }
@@ -1308,7 +1308,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
      * @return bool Success status
      * @throws \Exception If not connected to the server.
      */
-    public function delete_messages($uids, $expunge = false) {
+    public function delete_messages($uids, $expunge = true) {
         if (!$this->connected) {
             throw new \Exception('Not connected to the server.');
         }
