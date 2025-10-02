@@ -435,12 +435,15 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             // Get attachments
             $attachments = $message->getAttachments();
             foreach ($attachments as $attachment) {
+                $decoded_content = $attachment->getDecodedContent();
+                $size_bytes = strlen($decoded_content);
+
                 $email_data['attachments'][] = [
                     'filename' => $attachment->getFilename(),
                     'mimetype' => $attachment->getType() . '/' . $attachment->getSubtype(),
                     'encoding' => $attachment->getEncoding(),
-                    'data' => $attachment->getDecodedContent(),
-                    'size' => $attachment->getSize()
+                    'data' => base64_encode($decoded_content),
+                    'size' => $size_bytes
                 ];
             }
 
@@ -1541,12 +1544,15 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             }
 
             $attachment = $attachments[$attachment_index];
+            $decoded_content = $attachment->getDecodedContent();
+            $size_bytes = strlen($decoded_content);
+
             return [
                 'filename' => $attachment->getFilename(),
                 'mimetype' => $attachment->getType() . '/' . $attachment->getSubtype(),
                 'encoding' => $attachment->getEncoding(),
-                'data' => $attachment->getDecodedContent(),
-                'size' => $attachment->getSize()
+                'data' => base64_encode($decoded_content),
+                'size' => $size_bytes
             ];
 
         } catch (\Exception $e) {
