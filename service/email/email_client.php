@@ -572,22 +572,71 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
         }
     }
 
-    public function send_email($to, $subject, $body, $headers = [], $from = false) {
+    public function send_email($to, $subject, $body, $headers = [], $from = false, $cc = '', $bcc = '', $body_html = '', $attachments = []) {
         if (!$this->mailer) {
             throw new \Exception('SMTP connection not initialized. Call connect_smtp() first.');
         }
         try {
             $this->mailer->clearAddresses();
-            
+            $this->mailer->clearCCs();
+            $this->mailer->clearBCCs();
+            $this->mailer->clearAttachments();
+
             $this->mailer->setFrom(!$from ? $this->smtp_username : $from, 'Sender');
             $to = is_array($to)?implode(', ', $to):$to;
             $this->mailer->addAddress($to);
 
+            // Add CC recipients
+            if (!empty($cc)) {
+                $cc_list = is_array($cc) ? $cc : explode(',', $cc);
+                foreach ($cc_list as $cc_address) {
+                    $cc_address = trim($cc_address);
+                    if (!empty($cc_address)) {
+                        $this->mailer->addCC($cc_address);
+                    }
+                }
+            }
+
+            // Add BCC recipients
+            if (!empty($bcc)) {
+                $bcc_list = is_array($bcc) ? $bcc : explode(',', $bcc);
+                foreach ($bcc_list as $bcc_address) {
+                    $bcc_address = trim($bcc_address);
+                    if (!empty($bcc_address)) {
+                        $this->mailer->addBCC($bcc_address);
+                    }
+                }
+            }
+
             $this->mailer->Subject = $subject;
 
-            $this->mailer->Body = $body;
+            // Use body_html if provided, otherwise use body
+            if (!empty($body_html)) {
+                $this->mailer->isHTML(true);
+                $this->mailer->Body = $body_html;
+                $this->mailer->AltBody = $body; // Plain text alternative
+            } else {
+                $this->mailer->isHTML(true);
+                $this->mailer->Body = $body;
+            }
 
-            $this->mailer->isHTML(true);
+            // Add attachments
+            if (!empty($attachments) && is_array($attachments)) {
+                foreach ($attachments as $attachment) {
+                    if (isset($attachment['data']) && isset($attachment['filename'])) {
+                        // Attachment with base64 data
+                        $this->mailer->addStringAttachment(
+                            base64_decode($attachment['data']),
+                            $attachment['filename'],
+                            'base64',
+                            isset($attachment['mimetype']) ? $attachment['mimetype'] : 'application/octet-stream'
+                        );
+                    } elseif (isset($attachment['path'])) {
+                        // Attachment from file path
+                        $this->mailer->addAttachment($attachment['path'], isset($attachment['filename']) ? $attachment['filename'] : '');
+                    }
+                }
+            }
 
             foreach ($headers as $key => $value) {
                 $this->mailer->addCustomHeader($key, $value);
@@ -595,7 +644,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             $this->mailer->send();
         } catch (Exception $e) {
-            
+
             throw new \Exception('Mailer Error: ' . $this->mailer->ErrorInfo);
         }
     }
@@ -901,11 +950,11 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
     /**
      * Search emails with advanced criteria
-     * @param array $search_params Search parameters
+     * @param array $search_criteria Search parameters (also accepts search_params for backwards compatibility)
      * @return array Array of UIDs matching the criteria
      * @throws \Exception If not connected to the server.
      */
-    public function advanced_search($search_params) {
+    public function advanced_search($search_criteria) {
         if (!$this->connected) {
             throw new \Exception('Not connected to the server.');
         }
@@ -913,50 +962,61 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
         try {
             $search = new SearchExpression();
 
-            if (!empty($search_params['from'])) {
-                $search->addCondition(new From($search_params['from']));
+            if (!empty($search_criteria['from'])) {
+                $search->addCondition(new From($search_criteria['from']));
             }
 
-            if (!empty($search_params['to'])) {
-                $search->addCondition(new To($search_params['to']));
+            if (!empty($search_criteria['to'])) {
+                $search->addCondition(new To($search_criteria['to']));
             }
 
-            if (!empty($search_params['subject'])) {
-                $search->addCondition(new Subject($search_params['subject']));
+            if (!empty($search_criteria['subject'])) {
+                $search->addCondition(new Subject($search_criteria['subject']));
             }
 
-            if (!empty($search_params['body'])) {
-                $search->addCondition(new Body($search_params['body']));
+            if (!empty($search_criteria['body'])) {
+                $search->addCondition(new Body($search_criteria['body']));
             }
 
-            if (!empty($search_params['since'])) {
-                $since_date = new \DateTime($search_params['since']);
+            // Support both 'since' and 'date_from' for backwards compatibility
+            $date_from = !empty($search_criteria['date_from']) ? $search_criteria['date_from'] : (!empty($search_criteria['since']) ? $search_criteria['since'] : null);
+            if ($date_from) {
+                $since_date = new \DateTime($date_from);
                 $search->addCondition(new Since($since_date));
             }
 
-            if (!empty($search_params['before'])) {
-                $before_date = new \DateTime($search_params['before']);
+            // Support both 'before' and 'date_to' for backwards compatibility
+            $date_to = !empty($search_criteria['date_to']) ? $search_criteria['date_to'] : (!empty($search_criteria['before']) ? $search_criteria['before'] : null);
+            if ($date_to) {
+                $before_date = new \DateTime($date_to);
                 $search->addCondition(new Before($before_date));
             }
 
-            if (isset($search_params['seen'])) {
-                if ($search_params['seen']) {
+            // Support 'unread' parameter as alias for seen=false
+            if (isset($search_criteria['unread'])) {
+                if ($search_criteria['unread']) {
+                    $search->addCondition(new Unseen());
+                } else {
+                    $search->addCondition(new Seen());
+                }
+            } elseif (isset($search_criteria['seen'])) {
+                if ($search_criteria['seen']) {
                     $search->addCondition(new Seen());
                 } else {
                     $search->addCondition(new Unseen());
                 }
             }
 
-            if (isset($search_params['flagged'])) {
-                if ($search_params['flagged']) {
+            if (isset($search_criteria['flagged'])) {
+                if ($search_criteria['flagged']) {
                     $search->addCondition(new Flagged());
                 } else {
                     $search->addCondition(new Unflagged());
                 }
             }
 
-            if (isset($search_params['answered'])) {
-                if ($search_params['answered']) {
+            if (isset($search_criteria['answered'])) {
+                if ($search_criteria['answered']) {
                     $search->addCondition(new Answered());
                 } else {
                     $search->addCondition(new Unanswered());
@@ -1621,10 +1681,12 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
      * @param int $uid Email UID to reply to
      * @param string $reply_body Reply message body
      * @param bool $reply_all Whether to reply to all recipients
+     * @param string $body_html HTML version of reply body
+     * @param array $attachments Additional attachments to include
      * @return bool Success status
      * @throws \Exception If not connected to the server.
      */
-    public function reply_to_email($uid, $reply_body, $reply_all = false) {
+    public function reply_to_email($uid, $reply_body, $reply_all = false, $body_html = '', $attachments = []) {
         if (!$this->connected || !$this->mailer) {
             throw new \Exception('Not connected to server or SMTP not configured.');
         }
@@ -1649,8 +1711,10 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             // Set sender (FROM)
             $this->mailer->setFrom($this->smtp_username, 'Sender');
 
-            // Clear previous recipients
+            // Clear previous recipients and attachments
             $this->mailer->clearAddresses();
+            $this->mailer->clearCCs();
+            $this->mailer->clearAttachments();
             $this->mailer->addAddress($reply_to);
 
             if ($reply_all) {
@@ -1673,8 +1737,36 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             // Set reply content
             $this->mailer->Subject = $reply_subject;
-            $this->mailer->Body = $reply_body;
+
+            // Use body_html if provided, otherwise use reply_body
+            if (!empty($body_html)) {
+                $this->mailer->isHTML(true);
+                $this->mailer->Body = $body_html;
+                $this->mailer->AltBody = $reply_body; // Plain text alternative
+            } else {
+                $this->mailer->isHTML(true);
+                $this->mailer->Body = $reply_body;
+            }
+
             $this->mailer->addCustomHeader('In-Reply-To', $original_message->getId());
+
+            // Add attachments
+            if (!empty($attachments) && is_array($attachments)) {
+                foreach ($attachments as $attachment) {
+                    if (isset($attachment['data']) && isset($attachment['filename'])) {
+                        // Attachment with base64 data
+                        $this->mailer->addStringAttachment(
+                            base64_decode($attachment['data']),
+                            $attachment['filename'],
+                            'base64',
+                            isset($attachment['mimetype']) ? $attachment['mimetype'] : 'application/octet-stream'
+                        );
+                    } elseif (isset($attachment['path'])) {
+                        // Attachment from file path
+                        $this->mailer->addAttachment($attachment['path'], isset($attachment['filename']) ? $attachment['filename'] : '');
+                    }
+                }
+            }
 
             // Send reply
             $this->mailer->send();
@@ -1694,17 +1786,19 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
      * @param int $uid Email UID to forward
      * @param string $to_email Recipient email
      * @param string $forward_message Additional message
+     * @param string $cc CC recipients
+     * @param string $bcc BCC recipients
+     * @param string $body_html HTML version of forward message
+     * @param array $additional_attachments Additional attachments to include
      * @return bool Success status
      * @throws \Exception If not connected to the server.
      */
-    public function forward_email($uid, $to_email, $forward_message = '') {
+    public function forward_email($uid, $to_email, $forward_message = '', $cc = '', $bcc = '', $body_html = '', $additional_attachments = []) {
         if (!$this->connected || !$this->mailer) {
             throw new \Exception('Not connected to server or SMTP not configured.');
         }
 
         $to_email = is_array($to_email)?implode(', ', $to_email):$to_email;
-
-        
 
         try {
             $original_message = $this->current_mailbox->getMessage($uid);
@@ -1721,11 +1815,12 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             $forward_subject = preg_match('/^Fwd?:/i', $original_subject) ? $original_subject : 'Fwd: ' . $original_subject;
 
             // Determine if we should send HTML or plain text
-            $is_html = !empty($original_body_html);
+            $is_html = !empty($original_body_html) || !empty($body_html);
 
             if ($is_html) {
                 // HTML format
-                $forward_body = nl2br(htmlspecialchars($forward_message))
+                $forward_html = !empty($body_html) ? $body_html : nl2br(htmlspecialchars($forward_message));
+                $forward_body = $forward_html
                     . "<br><br><b>---------- Forwarded message ----------</b><br><br>"
                     . $original_body_html;
             } else {
@@ -1738,14 +1833,39 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
 
             // Clear previous recipients and set new ones
             $this->mailer->clearAddresses();
+            $this->mailer->clearCCs();
+            $this->mailer->clearBCCs();
+            $this->mailer->clearAttachments();
             $this->mailer->addAddress($to_email);
+
+            // Add CC recipients
+            if (!empty($cc)) {
+                $cc_list = is_array($cc) ? $cc : explode(',', $cc);
+                foreach ($cc_list as $cc_address) {
+                    $cc_address = trim($cc_address);
+                    if (!empty($cc_address)) {
+                        $this->mailer->addCC($cc_address);
+                    }
+                }
+            }
+
+            // Add BCC recipients
+            if (!empty($bcc)) {
+                $bcc_list = is_array($bcc) ? $bcc : explode(',', $bcc);
+                foreach ($bcc_list as $bcc_address) {
+                    $bcc_address = trim($bcc_address);
+                    if (!empty($bcc_address)) {
+                        $this->mailer->addBCC($bcc_address);
+                    }
+                }
+            }
 
             // Set forward content
             $this->mailer->Subject = $forward_subject;
             $this->mailer->Body = $forward_body;
             $this->mailer->isHTML($is_html);
 
-            // Forward attachments
+            // Forward original attachments
             $attachments = $original_message->getAttachments();
             foreach ($attachments as $attachment) {
                 $this->mailer->addStringAttachment(
@@ -1754,6 +1874,24 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
                     'base64',
                     $attachment->getType() . '/' . $attachment->getSubtype()
                 );
+            }
+
+            // Add additional attachments
+            if (!empty($additional_attachments) && is_array($additional_attachments)) {
+                foreach ($additional_attachments as $attachment) {
+                    if (isset($attachment['data']) && isset($attachment['filename'])) {
+                        // Attachment with base64 data
+                        $this->mailer->addStringAttachment(
+                            base64_decode($attachment['data']),
+                            $attachment['filename'],
+                            'base64',
+                            isset($attachment['mimetype']) ? $attachment['mimetype'] : 'application/octet-stream'
+                        );
+                    } elseif (isset($attachment['path'])) {
+                        // Attachment from file path
+                        $this->mailer->addAttachment($attachment['path'], isset($attachment['filename']) ? $attachment['filename'] : '');
+                    }
+                }
             }
 
             // Send forward

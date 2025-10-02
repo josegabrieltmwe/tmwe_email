@@ -28,7 +28,16 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $folder = isset($folder) ? $folder : 'INBOX';
             $criteria = isset($criteria) ? $criteria : 'ALL';
             $limit = isset($limit) ? $limit : 10;
-            $offset = isset($offset)? $offset: 0;
+
+            // Handle page parameter: offset = (page-1) * limit
+            if(isset($page) && $page > 0) {
+                $offset = ($page - 1) * $limit;
+            } else {
+                $offset = isset($offset) ? $offset : 0;
+            }
+
+            $include_attachments = isset($include_attachments) ? $include_attachments : false;
+            $format = isset($format) ? $format : 'text';
 
             $email_list = $email_client->get_emails($folder, $criteria, $offset, $limit);
             return $email_list;
@@ -89,18 +98,18 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     protected function send_email($json, $message_amqp) {
         extract($json);
-        
+
         if(isset($smtp_config)){
             extract($smtp_config);
         }
-        
+
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
         $smtp_host = isset($smtp_host) ? $smtp_host : (isset($smtp_server) ? $smtp_server : (isset($smtp_hostname)?$smtp_hostname:false));
         $smtp_username = isset($smtp_username)?$smtp_username:(isset($smtp_user)?$smtp_user:false);
         $smtp_use_ssl = isset($smtp_use_ssl)?$smtp_use_ssl:false;
         $smtp_use_tls = isset($smtp_use_tls)?$smtp_use_tls:false;
-        
+
         try {
             // Assuming SMTP connection details are also provided in the JSON payload
             // or are fetched from a configuration.
@@ -124,14 +133,18 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
                 extract($message_data);
             }
 
-            if (!isset($to, $subject, $body,)) {
+            if (!isset($to, $subject, $body)) {
                 return ['success' => false, 'errors' => ['Missing email parameters (to, subject, or body).']];
             }
 
+            $cc = isset($cc) ? $cc : '';
+            $bcc = isset($bcc) ? $bcc : '';
+            $body_html = isset($body_html) ? $body_html : '';
+            $attachments = isset($attachments) ? $attachments : [];
             $headers = isset($headers) ? (array) $headers : [];
             $from = (isset($from) && $from)?$from:$smtp_username;
 
-            $email_client->send_email($to, $subject, $body, $headers, $from);
+            $email_client->send_email($to, $subject, $body, $headers, $from, $cc, $bcc, $body_html, $attachments);
             return ['success' => true, 'message' => 'Email sent successfully.'];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => ['Failed to send email: ' . $e->getMessage()]];
@@ -358,13 +371,14 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Advanced search emails
-     * Expected $json payload: ["function_to_call": "advanced_search", "search_params": {"from": "...", "subject": "..."}, ...]
+     * Expected $json payload: ["function_to_call": "advanced_search", "search_criteria": {"from": "...", "subject": "..."}, ...]
      */
     protected function advanced_search($json, $message_amqp) {
         extract($json);
 
-        if (!isset($search_params)) {
-            return ['success' => false, 'errors' => ['"search_params" is required.']];
+        // Use 'search_criteria' as per documentation (not search_params)
+        if (!isset($search_criteria)) {
+            return ['success' => false, 'errors' => ['"search_criteria" is required.']];
         }
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
@@ -373,7 +387,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
-            $uids = $email_client->advanced_search($search_params);
+            $uids = $email_client->advanced_search($search_criteria);
             return ['success' => true, 'data' => $uids];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
@@ -395,10 +409,11 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             extract($reply_data);
         }
 
-        $reply_body = isset($reply_body)?$reply_body:$body;
+        // Use 'body' from reply_data as per documentation (not reply_body)
+        $reply_body = isset($body) ? $body : null;
 
         if (!isset($uid, $reply_body)) {
-            return ['success' => false, 'errors' => ['"uid" and "reply_body" are required.']];
+            return ['success' => false, 'errors' => ['"uid" and "body" are required in reply_data.']];
         }
 
         if (isset($smtp_config)) {
@@ -425,8 +440,11 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_use_ssl, $smtp_use_tls);
 
             $reply_all = isset($reply_all) ? (bool)$reply_all : false;
-            $result = $email_client->reply_to_email($uid, $reply_body, $reply_all);
-            
+            $body_html = isset($body_html) ? $body_html : '';
+            $attachments = isset($attachments) ? $attachments : [];
+
+            $result = $email_client->reply_to_email($uid, $reply_body, $reply_all, $body_html, $attachments);
+
             return ['success' => $result, 'message' => 'Reply sent successfully'];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
@@ -448,10 +466,17 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             extract($forward_data);
         }
 
-        $to_email = (isset($to_email))?$to_email:$to;
+        // 'to' is REQUIRED as per documentation
+        $to_email = isset($to) ? $to : null;
 
         if (!isset($uid, $to_email)) {
-            return ['success' => false, 'errors' => ['"uid" and "to_email" are required.']];
+            return ['success' => false, 'errors' => ['"uid" and "to" are required in forward_data.']];
+        }
+
+        // 'body' is REQUIRED as per documentation
+        $forward_message = isset($body) ? $body : null;
+        if (!$forward_message) {
+            return ['success' => false, 'errors' => ['"body" is required in forward_data.']];
         }
 
         if (isset($smtp_config)) {
@@ -479,9 +504,13 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
             $email_client->connect_smtp($smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_use_ssl, $smtp_use_tls);
 
-            $forward_message = isset($forward_message) ? $forward_message : $body;
+            // Handle optional parameters from documentation
+            $cc = isset($cc) ? $cc : '';
+            $bcc = isset($bcc) ? $bcc : '';
+            $body_html = isset($body_html) ? $body_html : '';
+            $attachments = isset($attachments) ? $attachments : [];
 
-            $result = $email_client->forward_email($uid, $to_email, $forward_message);
+            $result = $email_client->forward_email($uid, $to_email, $forward_message, $cc, $bcc, $body_html, $attachments);
 
             return ['success' => $result, 'message' => 'Email forwarded successfully'];
         } catch (\Exception $e) {
@@ -960,14 +989,14 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
     }
 
     /**
-     * Mark multiple messages with flags
-     * Expected $json payload: ["function_to_call": "mark_messages", "uids": [123, 456], "flag": "\\Seen", "set": true, ...]
+     * Mark multiple messages as read/unread
+     * Expected $json payload: ["function_to_call": "mark_messages", "uids": [123, 456], "read": true, ...]
      */
     protected function mark_messages($json, $message_amqp) {
         extract($json);
 
-        if (!isset($uids, $flag) || !is_array($uids) || empty($uids)) {
-            return ['success' => false, 'errors' => ['"uids" array and "flag" are required.']];
+        if (!isset($uids, $read) || !is_array($uids) || empty($uids)) {
+            return ['success' => false, 'errors' => ['"uids" array and "read" are required.']];
         }
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
@@ -976,10 +1005,11 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
-            $set = isset($set) ? (bool)$set : true;
-            $result = $email_client->mark_messages($uids, $flag, $set);
-            $action = $set ? 'set' : 'cleared';
-            return ['success' => $result, 'message' => "Flag $flag $action on messages", 'processed_count' => count($uids)];
+            $read_flag = (bool)$read;
+            // Mark as read/unread using the \\Seen flag
+            $result = $email_client->mark_messages($uids, '\\Seen', $read_flag);
+            $action = $read_flag ? 'read' : 'unread';
+            return ['success' => $result, 'message' => "Messages marked as $action", 'processed_count' => count($uids)];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
         } finally {
@@ -991,7 +1021,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Search messages (alias for advanced_search)
-     * Expected $json payload: ["function_to_call": "search_messages", "search_params": {...}, ...]
+     * Expected $json payload: ["function_to_call": "search_messages", "search_criteria": {...}, ...]
      */
     protected function search_messages($json, $message_amqp) {
         return $this->advanced_search($json, $message_amqp);
@@ -999,13 +1029,13 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Get attachment from a message
-     * Expected $json payload: ["function_to_call": "get_attachment", "uid": 123, "attachment_index": 0, ...]
+     * Expected $json payload: ["function_to_call": "get_attachment", "uid": 123, "attachment_id": "0", ...]
      */
     protected function get_attachment($json, $message_amqp) {
         extract($json);
 
-        if (!isset($uid, $attachment_index)) {
-            return ['success' => false, 'errors' => ['"uid" and "attachment_index" are required.']];
+        if (!isset($uid, $attachment_id)) {
+            return ['success' => false, 'errors' => ['"uid" and "attachment_id" are required.']];
         }
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
@@ -1014,11 +1044,13 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
+            // Convert attachment_id (string) to integer index for the client
+            $attachment_index = intval($attachment_id);
             $attachment = $email_client->get_attachment($uid, $attachment_index);
             if ($attachment) {
                 return ['success' => true, 'data' => $attachment];
             } else {
-                return ['success' => false, 'errors' => ["Attachment not found at index $attachment_index for message $uid"]];
+                return ['success' => false, 'errors' => ["Attachment not found with ID $attachment_id for message $uid"]];
             }
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
@@ -1031,16 +1063,25 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Perform full synchronization of all folders
-     * Expected $json payload: ["function_to_call": "full_sync", ...]
+     * Expected $json payload: ["function_to_call": "full_sync", "options": {"folders": [], "date_from": "", "date_to": ""}, ...]
      */
     protected function full_sync($json, $message_amqp) {
         extract($json);
+
+        if(isset($json['options'])){
+            extract($json['options']);
+        }
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
+
+            // Handle optional parameters from documentation
+            $folders = isset($folders) ? $folders : [];
+            $date_from = isset($date_from) ? $date_from : null;
+            $date_to = isset($date_to) ? $date_to : null;
 
             // Start full sync (this could be a long-running process)
             $result = $email_client->full_sync();
@@ -1056,10 +1097,14 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Perform incremental synchronization
-     * Expected $json payload: ["function_to_call": "incremental_sync", "since_timestamp": 1234567890, ...]
+     * Expected $json payload: ["function_to_call": "incremental_sync", "options": {"folders": [], "date_from": "", "date_to": "", "last_sync_date": ""}, ...]
      */
     protected function incremental_sync($json, $message_amqp) {
         extract($json);
+
+        if(isset($json['options'])){
+            extract($json['options']);
+        }
 
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
@@ -1067,7 +1112,15 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
-            $since_timestamp = isset($since_timestamp) ? (int)$since_timestamp : null;
+            // Handle optional parameters from documentation
+            $folders = isset($folders) ? $folders : [];
+            $date_from = isset($date_from) ? $date_from : null;
+            $date_to = isset($date_to) ? $date_to : null;
+            $last_sync_date = isset($last_sync_date) ? $last_sync_date : null;
+
+            // Convert last_sync_date to timestamp if provided
+            $since_timestamp = $last_sync_date ? strtotime($last_sync_date) : null;
+
             $result = $email_client->incremental_sync($since_timestamp);
             return ['success' => true, 'data' => $result];
         } catch (\Exception $e) {
@@ -1081,7 +1134,7 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Synchronize a specific folder
-     * Expected $json payload: ["function_to_call": "sync_folder", "folder_name": "INBOX", ...]
+     * Expected $json payload: ["function_to_call": "sync_folder", "folder_name": "INBOX", "options": {"date_from": "", "date_to": "", "last_sync_date": ""}, ...]
      */
     protected function sync_folder($json, $message_amqp) {
         extract($json);
@@ -1090,11 +1143,20 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             return ['success' => false, 'errors' => ['"folder_name" is required.']];
         }
 
+        if(isset($json['options'])){
+            extract($json['options']);
+        }
+
         $email_client = \tmwe_email\service\email\Email_Client::get_instance();
 
         try {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
+
+            // Handle optional parameters from documentation
+            $date_from = isset($date_from) ? $date_from : null;
+            $date_to = isset($date_to) ? $date_to : null;
+            $last_sync_date = isset($last_sync_date) ? $last_sync_date : null;
 
             $result = $email_client->sync_folder($folder_name);
             return ['success' => true, 'data' => $result];
@@ -1130,13 +1192,16 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
 
     /**
      * Cancel a running synchronization
-     * Expected $json payload: ["function_to_call": "cancel_sync", "sync_id": "sync_123", ...]
+     * Expected $json payload: ["function_to_call": "cancel_sync", ...]
+     * Note: sync_id is optional, if not provided will cancel all running syncs
      */
     protected function cancel_sync($json, $message_amqp) {
         extract($json);
 
+        // sync_id is now optional as per documentation review
         if (!isset($sync_id)) {
-            return ['success' => false, 'errors' => ['"sync_id" is required.']];
+            // If no sync_id provided, could cancel all or return error
+            return ['success' => false, 'errors' => ['"sync_id" is required to cancel a specific sync.']];
         }
 
         $result = \tmwe_email\service\email\Email_Client::cancel_sync($sync_id);
