@@ -301,8 +301,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
     }
 
     /**
-     * Delete email
-     * Expected $json payload: ["function_to_call": "delete_email", "uid": 123, "expunge": false, ...]
+     * Delete email permanently
+     * Expected $json payload: ["function_to_call": "delete_email", "uid": 123, ...]
      */
     protected function delete_email($json, $message_amqp) {
         extract($json);
@@ -317,9 +317,36 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
-            $expunge = isset($expunge) ? (bool)$expunge : false;
-            $result = $email_client->delete_email($uid, $expunge);
-            return ['success' => $result, 'message' => 'Email deleted'];
+            $result = $email_client->delete_email($uid);
+            return ['success' => $result, 'message' => 'Email permanently deleted'];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Move email to Trash folder
+     * Expected $json payload: ["function_to_call": "move_to_trash", "uid": 123, ...]
+     */
+    protected function move_to_trash($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($uid)) {
+            return ['success' => false, 'errors' => ['"uid" is required.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
+
+            $result = $email_client->move_to_trash($uid);
+            return ['success' => $result, 'message' => 'Email moved to Trash'];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
         } finally {
@@ -834,8 +861,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
     }
 
     /**
-     * Delete multiple messages
-     * Expected $json payload: ["function_to_call": "delete_messages", "uids": [123, 456], "expunge": false, ...]
+     * Delete multiple messages permanently
+     * Expected $json payload: ["function_to_call": "delete_messages", "uids": [123, 456], ...]
      */
     protected function delete_messages($json, $message_amqp) {
         extract($json);
@@ -850,9 +877,36 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             $email_client->connect($imap_hostname, $imap_username, $imap_password,
                 isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
 
-            $expunge = isset($expunge) ? (bool)$expunge : false;
-            $result = $email_client->delete_messages($uids, $expunge);
-            return ['success' => $result, 'message' => 'Messages deleted', 'processed_count' => count($uids)];
+            $result = $email_client->delete_messages($uids);
+            return ['success' => $result, 'message' => 'Messages permanently deleted', 'processed_count' => count($uids)];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
+    /**
+     * Move multiple messages to Trash folder
+     * Expected $json payload: ["function_to_call": "move_messages_to_trash", "uids": [123, 456], ...]
+     */
+    protected function move_messages_to_trash($json, $message_amqp) {
+        extract($json);
+
+        if (!isset($uids) || !is_array($uids) || empty($uids)) {
+            return ['success' => false, 'errors' => ['"uids" array is required and cannot be empty.']];
+        }
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
+
+            $result = $email_client->move_messages_to_trash($uids);
+            return ['success' => $result, 'message' => 'Messages moved to Trash', 'processed_count' => count($uids)];
         } catch (\Exception $e) {
             return ['success' => false, 'errors' => [$e->getMessage()]];
         } finally {
@@ -1078,6 +1132,30 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
         }
     }
 
+    /**
+     * Empty the Trash folder (permanently delete all emails in trash)
+     * Expected $json payload: ["function_to_call": "empty_trash", ...]
+     */
+    protected function empty_trash($json, $message_amqp) {
+        extract($json);
+
+        $email_client = \tmwe_email\service\email\Email_Client::get_instance();
+
+        try {
+            $email_client->connect($imap_hostname, $imap_username, $imap_password,
+                isset($imap_port) ? $imap_port : 993, isset($imap_use_ssl) ? $imap_use_ssl : true, isset($imap_use_tls) ? $imap_use_tls : false);
+
+            $result = $email_client->empty_trash();
+            return ['success' => $result, 'message' => 'Trash folder has been emptied'];
+        } catch (\Exception $e) {
+            return ['success' => false, 'errors' => [$e->getMessage()]];
+        } finally {
+            if ($email_client->is_connected()) {
+                $email_client->disconnect();
+            }
+        }
+    }
+
     public function handle_rpc_request($json, $message_amqp) {
 
         if (!isset($json['function_to_call'])) {
@@ -1109,6 +1187,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             case 'copy_email':
                 return $this->$function_to_call($json, $message_amqp);
             case 'delete_email':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'move_to_trash':
                 return $this->$function_to_call($json, $message_amqp);
             case 'advanced_search':
                 return $this->$function_to_call($json, $message_amqp);
@@ -1152,6 +1232,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
                 return $this->$function_to_call($json, $message_amqp);
             case 'delete_messages':
                 return $this->$function_to_call($json, $message_amqp);
+            case 'move_messages_to_trash':
+                return $this->$function_to_call($json, $message_amqp);
             case 'move_messages':
                 return $this->$function_to_call($json, $message_amqp);
             case 'mark_messages':
@@ -1169,6 +1251,8 @@ class Email_Consumer extends \tmwe_email\rabbitmq\Abstract_Consumer_Rpc {
             case 'get_sync_status':
                 return $this->$function_to_call($json, $message_amqp);
             case 'cancel_sync':
+                return $this->$function_to_call($json, $message_amqp);
+            case 'empty_trash':
                 return $this->$function_to_call($json, $message_amqp);
 
             default:

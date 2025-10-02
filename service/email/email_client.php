@@ -666,13 +666,12 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
     }
 
     /**
-     * Delete an email (mark for deletion)
+     * Delete an email permanently
      * @param int $uid Email UID
-     * @param bool $expunge Whether to immediately expunge deleted emails
      * @return bool Success status
      * @throws \Exception If not connected to the server.
      */
-    public function delete_email($uid, $expunge = true) {
+    public function delete_email($uid) {
         if (!$this->connected) {
             throw new \Exception('Not connected to the server.');
         }
@@ -684,14 +683,57 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             }
 
             $message->delete();
-
-            if ($expunge) {
-                $this->current_mailbox->expunge();
-            }
+            $this->current_mailbox->expunge();
 
             return true;
         } catch (\Exception $e) {
             $this->log_fail("Error deleting message: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Move an email to Trash folder
+     * @param int $uid Email UID
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function move_to_trash($uid) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        try {
+            // Find the trash folder
+            $trash_folders = ['Trash', 'INBOX.Trash', 'Deleted', 'INBOX.Deleted'];
+            $target_folder = null;
+
+            foreach ($trash_folders as $folder_name) {
+                try {
+                    $this->connection->getMailbox($folder_name);
+                    $target_folder = $folder_name;
+                    break;
+                } catch (\Exception $e) {
+                    continue;
+                }
+            }
+
+            // If no trash folder exists, create one
+            if (!$target_folder) {
+                try {
+                    $this->connection->createMailbox('Trash');
+                    $target_folder = 'Trash';
+                } catch (\Exception $e) {
+                    $this->log_fail("Could not create Trash folder: " . $e->getMessage());
+                    throw new \Exception('Could not find or create Trash folder');
+                }
+            }
+
+            // Move to trash
+            return $this->move_email($uid, $target_folder);
+
+        } catch (\Exception $e) {
+            $this->log_fail("Error moving message to trash: " . $e->getMessage());
             return false;
         }
     }
@@ -1200,6 +1242,46 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
     }
 
     /**
+     * Empty the Trash folder (permanently delete all emails in trash)
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function empty_trash() {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        try {
+            // Find the trash folder
+            $trash_folders = ['Trash', 'INBOX.Trash', 'Deleted', 'INBOX.Deleted'];
+            $trash_folder = null;
+
+            foreach ($trash_folders as $folder_name) {
+                try {
+                    $this->connection->getMailbox($folder_name);
+                    $trash_folder = $folder_name;
+                    break;
+                } catch (\Exception $e) {
+                    continue;
+                }
+            }
+
+            if (!$trash_folder) {
+                $this->log("No trash folder found to empty");
+                return true; // No trash folder exists, nothing to empty
+            }
+
+            // Empty the trash folder
+            $this->log("Emptying trash folder: {$trash_folder}");
+            return $this->empty_folder($trash_folder);
+
+        } catch (\Exception $e) {
+            $this->log_fail("Error emptying trash: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Get account information
      * @return array Account information
      * @throws \Exception If not connected to the server.
@@ -1302,13 +1384,12 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
     }
 
     /**
-     * Delete multiple messages
+     * Delete multiple messages permanently
      * @param array $uids Array of UIDs to delete
-     * @param bool $expunge Whether to immediately expunge
      * @return bool Success status
      * @throws \Exception If not connected to the server.
      */
-    public function delete_messages($uids, $expunge = true) {
+    public function delete_messages($uids) {
         if (!$this->connected) {
             throw new \Exception('Not connected to the server.');
         }
@@ -1320,14 +1401,57 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
                     $message->delete();
                 }
             }
-
-            if ($expunge) {
-                $this->current_mailbox->expunge();
-            }
+            $this->current_mailbox->expunge();
 
             return true;
         } catch (\Exception $e) {
             $this->log_fail("Error deleting messages: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Move multiple messages to Trash folder
+     * @param array $uids Array of UIDs to move to trash
+     * @return bool Success status
+     * @throws \Exception If not connected to the server.
+     */
+    public function move_messages_to_trash($uids) {
+        if (!$this->connected) {
+            throw new \Exception('Not connected to the server.');
+        }
+
+        try {
+            // Find the trash folder
+            $trash_folders = ['Trash', 'INBOX.Trash', 'Deleted', 'INBOX.Deleted'];
+            $target_folder = null;
+
+            foreach ($trash_folders as $folder_name) {
+                try {
+                    $this->connection->getMailbox($folder_name);
+                    $target_folder = $folder_name;
+                    break;
+                } catch (\Exception $e) {
+                    continue;
+                }
+            }
+
+            // If no trash folder exists, create one
+            if (!$target_folder) {
+                try {
+                    $this->connection->createMailbox('Trash');
+                    $target_folder = 'Trash';
+                } catch (\Exception $e) {
+                    $this->log_fail("Could not create Trash folder: " . $e->getMessage());
+                    throw new \Exception('Could not find or create Trash folder');
+                }
+            }
+
+            // Move all messages to trash
+            return $this->move_messages($uids, $target_folder);
+
+        } catch (\Exception $e) {
+            $this->log_fail("Error moving messages to trash: " . $e->getMessage());
             return false;
         }
     }
