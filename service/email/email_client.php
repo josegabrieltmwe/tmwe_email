@@ -451,6 +451,38 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
     }
 
     /**
+     * Ensure data is in UTF-8 encoding
+     * @param mixed $data Data to convert
+     * @return mixed Converted data
+     */
+    private function ensure_utf8($data) {
+        if (is_string($data)) {
+            // Detectar la codificación actual
+            $encoding = mb_detect_encoding($data, ['UTF-8', 'ISO-8859-1', 'Windows-1252', 'ASCII'], true);
+
+            // Si no es UTF-8, convertir
+            if ($encoding && $encoding !== 'UTF-8') {
+                $data = mb_convert_encoding($data, 'UTF-8', $encoding);
+            } elseif (!$encoding) {
+                // Si no se detectó, asumir ISO-8859-1 (común en emails)
+                $data = mb_convert_encoding($data, 'UTF-8', 'ISO-8859-1');
+            }
+        } elseif (is_array($data)) {
+            // Aplicar recursivamente a arrays
+            foreach ($data as $key => $value) {
+                $data[$key] = $this->ensure_utf8($value);
+            }
+        } elseif (is_object($data)) {
+            // Aplicar a objetos
+            foreach ($data as $key => $value) {
+                $data->$key = $this->ensure_utf8($value);
+            }
+        }
+
+        return $data;
+    }
+
+    /**
      * Reads a single email by its UID.
      *
      * @param int $uid The UID of the email to read.
@@ -471,9 +503,9 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
             }
 
             $email_data = [
-                'header' => $this->message_to_overview($message),
-                'body_plain' => $message->getBodyText(),
-                'body_html' => $message->getBodyHtml(),
+                'header' => $this->ensure_utf8($this->message_to_overview($message)),
+                'body_plain' => $this->ensure_utf8($message->getBodyText()),
+                'body_html' => $this->ensure_utf8($message->getBodyHtml()),
                 'attachments' => []
             ];
 
