@@ -145,7 +145,7 @@ class Email_Client extends \tmwe_email\service\Abstract_Service {
                 $folder_list[] = [
                     'name' => $mailbox->getName(),
                     'messages' => $mailbox->count(),
-                    'unseen' => count($mailbox->getMessages(new Unseen())),
+                    'unseen' => 0, //count($mailbox->getMessages(new Unseen())),
                     'recent' => 0, // ddeboer/imap doesn't provide recent count directly
                     'full_name' => $mailbox->getFullEncodedName()
                 ];
